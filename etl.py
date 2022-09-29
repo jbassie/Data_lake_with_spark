@@ -8,6 +8,7 @@ findspark.init()
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import TimestampType, DateType, IntegerType
+from pyspark.sql.window import Window
 
 def create_Spark_Session():
     spark = SparkSession \
@@ -51,4 +52,75 @@ def process_log_data(spark, input_data, output_data):
     #filter by actions for song plays
     df  = df.where(df.page =="NextSong")
 
-    #
+    #extract columns for users table
+    # keep only user record for every user_id to capture dimension changes over time
+    users_table = df.selectExpr(['user_id', 'firstName as firstname', 'lastName as last_name', 'gender', 'level', 'ts'])
+    users_window = Window.partitionBy('user_id').orderBy(F.desc('ts'))
+    users_table = users_table.withColumn('row_number', F.row_number().over(users_window))
+    users_table = users_table.where(users_table.row_number ==1).drop('ts', 'row_number')
+
+    #write users table to parquet files
+    users_table.write.parquet(os.path.join(output_data, 'users'))
+
+    #create timestamp column fro original timestamp column
+    get_timestamp = F.udf(lambda ts: datetime.fromtimestamp(ts/1000).isoformat())
+    df = df.withColumn('Start_time', get_timestamp('ts').cast(TimestampType()))
+
+    #extract columns to create time table
+    time_table = df.select('start_time')
+    time_table = time_table.withColumn('hour', F.hour('start_time'))
+    time_table  = time_table.withColumn('day', F.dayofmonth('start_time'))
+    time_table = time_table.withColumn('week', F.weekofyear('start_time'))
+    time_table = time_table.withColumn('month', F.monht('start_time'))
+    time_table = time_table.withColumn('year', F.year('start_time'))
+    time_table = time_table.withcolumn('weekday', F.dayofweek('start_time'))
+
+    #write time table to parquet files partioned by year and month
+    time_table.write.parquet(os.path.join(output_data, 'time'), partitionBy = ['year','month'])
+
+    #read in song data to use for songplays table 
+    song_df = spark.read.json(os.path.join(input_data, 'song_data',"*", '*', "*"))
+
+    #extract columns from joined song and log datasets to create songplays table
+    df = df.orderBy('ts')
+    df = df.withColumn('songplay_id', F.monotonically_increasing_id())
+    song_df.creatOrReplaceTempView('Songs')
+    df.createorReplaceTempView('events')
+
+    #include year and month to allow parquet partitioning
+    songplays_table = spark.sql("""
+        SELECT
+            e.songplay_id,
+            e.start_time,
+            e.user_id,
+            e.level,
+            s.song_id,
+            s.artist_id,
+            e.sessionId as session_id,
+            e.location,
+            e.userAgent as user_agent,
+            year(e.start_time) as year,
+            month(e.start_time) as month
+        FROM events e
+        LEFT JOIN songs s ON
+            e.song = s.title AND
+            e.artist = s.artist_name AND
+            ABS(e.length - s.duration) > 2
+
+    """)
+
+    songplays_table.write.parquet(os.path.join(output_data, 'songplays'), partionBy = ['year', 'month'])
+
+def main():
+    spark = create_Spark_Session()
+    input_data = 's3a://udacity-dend/'
+    output_data = 's3a://udacity-dend-song-log'
+
+    process_song_data(spark, input_data, output_data)
+    process_log_data(spark, input_data, output_data)
+    spark.stop
+
+
+if __name__ =='__main__':
+    main()
+
