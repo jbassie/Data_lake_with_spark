@@ -1,14 +1,18 @@
 from datetime import datetime
-
-
-from datetime import datetime
 import os
+import configparser
 import findspark
 findspark.init()
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import TimestampType, DateType, IntegerType
 from pyspark.sql.window import Window
+
+
+config = configparser.ConfigParser()
+config.read('dl.cfg', encoding='utf-8-sig')
+os.environ['AWS_ACCESS_KEY_ID']=config['AWS']['AWS_ACCESS_KEY_ID']
+os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
 
 def create_Spark_Session():
     spark = SparkSession \
