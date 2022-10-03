@@ -119,7 +119,7 @@ def main():
     spark = create_Spark_Session()
     print("Creted Spark Session")
     input_data = 's3a://udacity-dend/'
-    output_data = 's3a://uda-project-bucket'
+    output_data = 's3a://uda-project-bucket/'
 
     print("Processing Song Data")
 
